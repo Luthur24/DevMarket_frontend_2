@@ -379,7 +379,8 @@ img{display:block;max-width:100%}
 .bub.theirs{align-self:flex-start;background:var(--card);border:1px solid var(--line)}
 .bub-time{font-size:.65rem;color:var(--t4);margin-top:.2rem;text-align:right}
 .msg-input-row{display:flex;gap:.5rem;padding:.85rem 1rem;border-top:1px solid var(--line);
-  background:var(--base);flex-shrink:0;padding-bottom:calc(.85rem + env(safe-area-inset-bottom))}
+  background:var(--base);flex-shrink:0;padding-bottom:calc(.85rem + env(safe-area-inset-bottom) + var(--tab-h))}
+
 .msg-input-row input{flex:1;padding:.58rem .85rem;background:var(--raised);
   border:1px solid var(--line);border-radius:var(--r-sm);color:var(--t1);font-size:.85rem}
 .msg-input-row input:focus{border-color:var(--blue)}
@@ -393,7 +394,7 @@ img{display:block;max-width:100%}
   .thread-wrap{height:100%;display:flex;flex-direction:column;border-radius:0}
   .bubbles{flex:1}
   .th-back{display:none}
-  .msg-input-row{padding-bottom:.85rem}
+.msg-input-row{padding-bottom:calc(.85rem + env(safe-area-inset-bottom))}
 }
 
 /* ─── WALLET ──────────────────────────────────────────────────── */
@@ -574,13 +575,16 @@ img{display:block;max-width:100%}
     <div class="ham-bar"></div>
   </button>
   <div class="topbar-logo"><span>&lt;/&gt;</span> DevMarket</div>
-  <div class="topbar-right" id="topbarRight">
-    <div class="topbar-wallet hidden" id="topWallet">$—</div>
-    <button class="topbar-icon-btn hidden" id="topMsgBtn" onclick="nav('view-messages',null)">
-      💬<span class="topbar-dot hidden" id="topDot"></span>
-    </button>
-    <button class="btn btn-p btn-sm hidden" id="topSignInBtn" onclick="openModal('signin')">Sign In</button>
-  </div>
+<div class="topbar-right" id="topbarRight">
+  <button class="topbar-icon-btn hidden" id="topCartBtn" onclick="nav('view-cart',null)">
+    🛒<span class="topbar-dot hidden" id="cartDot">0</span>
+  </button>
+  <div class="topbar-wallet hidden" id="topWallet">$—</div>
+  <button class="topbar-icon-btn hidden" id="topMsgBtn" onclick="nav('view-messages',null)">
+    💬<span class="topbar-dot hidden" id="topDot"></span>
+  </button>
+  <button class="btn btn-p btn-sm hidden" id="topSignInBtn" onclick="openModal('signin')">Sign In</button>
+</div>
 </header>
 
 <!-- ── MAIN PAGE ───────────────────────────────────────────────── -->
@@ -858,6 +862,20 @@ img{display:block;max-width:100%}
       <h3>When do I get paid?</h3><p>Sales are credited to your wallet instantly (minus the 5% commission). Withdraw to your bank any time from the Wallet section.</p>
     </div>
   </section>
+<!-- CART -->
+<section id="view-cart" class="view">
+  <div class="view-header-row view-header">
+    <div><div class="vh-title">Cart</div><div class="vh-sub">Review your items</div></div>
+    <button class="btn btn-p btn-sm" onclick="checkout()" id="chkBtn">Checkout</button>
+  </div>
+  <div id="cartItems"><div class="loading"><div class="spin"></div></div></div>
+  <div class="panel" style="margin-top:1rem">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:.9rem;color:var(--t2)">Total</span>
+      <span style="font-family:var(--mono);font-size:1.4rem;font-weight:600;color:var(--alice)" id="cartTotal">$0.00</span>
+    </div>
+  </div>
+</section>
 
 </main>
 
@@ -946,21 +964,23 @@ img{display:block;max-width:100%}
 
 <script>
 'use strict';
+
 /* ════════════════════════════════════════════════════════════
-   CONFIG — change API to your Render backend URL
+   CONFIG
 ════════════════════════════════════════════════════════════ */
 const API = 'https://devmarket-backend-1.onrender.com';
 
 /* ── STATE ────────────────────────────────────────────────── */
 let token   = localStorage.getItem('dm_token') || null;
 let me      = null;
-let cart    = JSON.parse(localStorage.getItem('dm_cart') || '[]');
+let cart    = [];
 let bp      = { page:1, cat:'all', sort:'created_at', q:'' };
 let srchTm  = null;
 let convId  = null;
 let convPid = null;
 let msSellerId = null;
 let msProdId   = null;
+let currentRating = 0;
 
 /* ── HTTP ─────────────────────────────────────────────────── */
 async function req(method, path, body, fd){
@@ -978,7 +998,6 @@ async function req(method, path, body, fd){
 
 /* ── INIT ─────────────────────────────────────────────────── */
 document.addEventListener('DOMContentLoaded', async ()=>{
-  renderCart();
   if(token){
     try{
       const d = await req('GET','/api/auth/me');
@@ -1004,9 +1023,9 @@ function applyMe(){
   updateWallet(me.wallet_balance);
   document.getElementById('topWallet').classList.remove('hidden');
   document.getElementById('topMsgBtn').classList.remove('hidden');
+  document.getElementById('topCartBtn').classList.remove('hidden');
   document.getElementById('topSignInBtn').classList.add('hidden');
   document.getElementById('drawerWallet').style.display='block';
-  // profile section
   document.getElementById('profAvName').textContent  = me.display_name||me.username;
   document.getElementById('profAvEmail').textContent = me.email;
   const pav = document.getElementById('profAv');
@@ -1015,6 +1034,7 @@ function applyMe(){
   document.getElementById('profBio').value      = me.bio||'';
   document.getElementById('profEmail').value    = me.email;
   document.getElementById('profUname').value    = me.username;
+  loadCart();
 }
 
 function applyGuest(){
@@ -1023,7 +1043,10 @@ function applyGuest(){
   document.getElementById('topSignInBtn').classList.remove('hidden');
   document.getElementById('topWallet').classList.add('hidden');
   document.getElementById('topMsgBtn').classList.add('hidden');
+  document.getElementById('topCartBtn').classList.add('hidden');
   document.getElementById('drawerWallet').style.display='none';
+  cart = [];
+  renderCartUI();
 }
 
 function updateWallet(v){
@@ -1066,7 +1089,6 @@ async function doRegister(){
 
 function logout(){
   token=null; me=null; localStorage.removeItem('dm_token');
-  cart=[]; localStorage.removeItem('dm_cart'); renderCart();
   applyGuest();
   toast('Signed out','info');
   nav('view-browse',null);
@@ -1075,20 +1097,17 @@ function logout(){
 /* ── NAV ──────────────────────────────────────────────────── */
 function nav(viewId, el){
   closeDrawer();
-  // views
+  closeThread();
   document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
   document.getElementById(viewId).classList.add('active');
-  // drawer buttons
   document.querySelectorAll('.nav-item').forEach(b=>b.classList.remove('active'));
   document.querySelector(`.nav-item[data-view="${viewId}"]`)?.classList.add('active');
-  // bottom tabs
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelector(`.tab-btn[data-view="${viewId}"]`)?.classList.add('active');
   if(el?.classList.contains('tab-btn')){
     document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
     el.classList.add('active');
   }
-  // lazy loads
   const loaders = {
     'view-discover':  loadDiscover,
     'view-library':   loadLibrary,
@@ -1097,6 +1116,7 @@ function nav(viewId, el){
     'view-wallet':    loadWallet,
     'view-listings':  loadMyListings,
     'view-profile':   loadProfile,
+    'view-cart':      loadCart,
   };
   loaders[viewId]?.();
 }
@@ -1180,7 +1200,7 @@ function cardHTML(p){
   const tags=(p.tags||[]).slice(0,3).map(t=>`<span class="pc-tag">${x(t)}</span>`).join('');
   return`<div class="pcard" onclick="openProd(${p.id})">
     ${img}
-    <button class="pc-fav" onclick="event.stopPropagation();fav(${p.id})">♡</button>
+    <button class="pc-fav" onclick="event.stopPropagation();toggleFav(${p.id})">♡</button>
     <div class="pc-body">
       <div class="pc-title ellipsis">${x(p.title)}</div>
       <div class="pc-seller ellipsis">by ${x(p.seller_name||'Unknown')}</div>
@@ -1211,6 +1231,21 @@ async function openProd(id){
           <div class="rev-text">${x(r.comment||'')}</div>
         </div>`).join(''))
       :`<div style="font-size:.8rem;color:var(--t3)">No reviews yet.</div>`;
+    
+    const userReviewed = me&&p.reviews&&p.reviews.find(r=>r.reviewer_id===me.id);
+    const canReview = me&&!isMine&&!userReviewed;
+    
+    const reviewForm = canReview?`
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--line)">
+        <div style="font-size:.79rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.6rem">Write a Review</div>
+        <div style="display:flex;gap:.3rem;margin-bottom:.6rem" id="starBox">
+          ${[1,2,3,4,5].map(n=>`<button onclick="setRating(${n})" class="star-btn" style="background:none;border:none;font-size:1.3rem;color:var(--t3);cursor:pointer">☆</button>`).join('')}
+        </div>
+        <textarea class="ta" id="revText" placeholder="Share your experience..." style="min-height:60px;margin-bottom:.5rem"></textarea>
+        <button class="btn btn-p btn-sm" onclick="submitReview(${p.id})">Submit Review</button>
+      </div>
+    `:(me&&!isMine&&userReviewed?`<div style="margin-top:1rem;font-size:.8rem;color:var(--t3)">You already reviewed this product</div>`:'');
+    
     document.getElementById('prodSheet').innerHTML=`
       <div class="mbox-handle"></div>
       ${img}
@@ -1221,55 +1256,154 @@ async function openProd(id){
       <div class="ps-tags">${tags}</div>
       <div class="ps-actions">
         ${!isMine?`<button class="msg-btn" onclick="openMsgSeller(${p.seller_id},'${x(p.seller_name)}',${p.id})">💬 Message Seller</button>`:'<span></span>'}
-        ${!isMine?`<button class="btn btn-p" onclick="addCart(${JSON.stringify(p).replace(/"/g,'&quot;')});closeModal('product')">Add to Cart</button>`:`<span class="bdg bdg-blue">Your listing</span>`}
+        ${!isMine?`<button class="btn btn-p" onclick="addToCart(${p.id})">Add to Cart</button>`:`<span class="bdg bdg-blue">Your listing</span>`}
       </div>
-      <div style="font-size:.79rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.6rem">Reviews</div>
-      ${revs}`;
+      <div style="font-size:.79rem;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.07em;margin-bottom:.6rem;margin-top:1rem">Reviews</div>
+      ${revs}
+      ${reviewForm}`;
   }catch(e){
     document.getElementById('prodSheet').innerHTML='<div class="mbox-handle"></div><div class="loading">'+e.message+'</div>';
   }
 }
 
-/* ── CART ─────────────────────────────────────────────────── */
-function addCart(p){
-  if(!me){ openModal('signin'); return; }
-  if(cart.find(i=>i.id===p.id)){toast('Already in cart','info');return;}
-  cart.push(p); saveCart(); toast(p.title+' added','ok');
+/* ── REVIEWS ───────────────────────────────────────────────── */
+function setRating(n){
+  currentRating=n;
+  const stars=document.querySelectorAll('.star-btn');
+  stars.forEach((btn,idx)=>{
+    btn.textContent=idx<n?'★':'☆';
+    btn.style.color=idx<n?'var(--amber)':'var(--t3)';
+  });
 }
-function removeCart(i){ cart.splice(i,1); saveCart(); }
-function saveCart(){ localStorage.setItem('dm_cart',JSON.stringify(cart)); renderCart(); }
-function renderCart(){
-  // rendered in drawer? No — cart is shown in the wallet view or as a floating sheet.
-  // For now update topbar badge via the msg button area.
-}
-
-async function checkout(){
-  if(!me){ openModal('signin'); return; }
-  if(!cart.length){ toast('Cart is empty','info'); return; }
+async function submitReview(pid){
+  if(!currentRating)return toast('Select a star rating','err');
+  const comment=document.getElementById('revText').value.trim();
   try{
-    const d=await req('POST','/api/orders',{items:cart.map(i=>i.id)});
-    toast('Purchase complete — $'+d.total_paid,'ok');
-    cart=[]; saveCart();
-    const me2=await req('GET','/api/auth/me'); me=me2.user; updateWallet(me.wallet_balance);
-  }catch(e){ toast(e.message,'err'); }
+    await req('POST','/api/products/'+pid+'/reviews',{rating:currentRating,comment});
+    toast('Review submitted','ok');
+    currentRating=0;
+    openProd(pid);
+  }catch(e){
+    if(e.message.includes('Purchase required'))toast('Purchase required to review','err');
+    else if(e.message.includes('Already reviewed'))toast('You already reviewed this','err');
+    else toast(e.message,'err');
+  }
 }
 
-async function fav(pid){
-  if(!me){ openModal('signin'); return; }
-  try{ await req('POST','/api/favorites',{product_id:pid}); toast('Saved to favorites','ok'); }
-  catch(e){
-    try{ await req('DELETE','/api/favorites/'+pid); toast('Removed from favorites','info'); }catch(e2){}
+/* ── CART ──────────────────────────────────────────────────── */
+async function addToCart(pid){
+  if(!me){openModal('signin');return;}
+  try{
+    await req('POST','/api/cart',{product_id:pid});
+    await loadCart();
+    toast('Added to cart','ok');
+    closeModal('product');
+  }catch(e){
+    if(e.message.includes('Already in cart'))toast('Already in cart','info');
+    else toast(e.message,'err');
+  }
+}
+async function loadCart(){
+  if(!me){renderCartUI();return;}
+  try{
+    const d=await req('GET','/api/cart');
+    cart=d.cart||[];
+    renderCartUI();
+  }catch(e){toast('Cart load failed: '+e.message,'err');}
+}
+function renderCartUI(){
+  const el=document.getElementById('cartItems');
+  const dot=document.getElementById('cartDot');
+  if(!el)return;
+  if(!cart||!cart.length){
+    el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🛒</span><span class="empty-title">Cart is empty</span></div>';
+    dot?.classList.add('hidden');
+    const totalEl=document.getElementById('cartTotal');
+    if(totalEl)totalEl.textContent='$0.00';
+    const chk=document.getElementById('chkBtn');
+    if(chk)chk.disabled=true;
+    return;
+  }
+  dot?.classList.remove('hidden');
+  dot.textContent=cart.length;
+  let total=0;
+  el.innerHTML=cart.map(item=>{
+    const price=parseFloat(item.price||0);
+    total+=price;
+    const img=item.image_url?`<img src="${x(item.image_url)}" style="width:100%;height:100%;object-fit:cover">`:`<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;font-size:1.5rem;color:var(--t4)">📦</div>`;
+    return`<div class="sale-row" style="margin-bottom:.5rem">
+      <div style="width:56px;height:56px;border-radius:var(--r-sm);overflow:hidden;flex-shrink:0;background:var(--raised)">${img}</div>
+      <div style="flex:1;min-width:0;margin-left:.85rem">
+        <div class="sr-title ellipsis" style="font-size:.9rem">${x(item.title)}</div>
+        <div class="sr-buyer" style="margin-top:.15rem">by ${x(item.seller_name||'Unknown')}</div>
+      </div>
+      <div style="text-align:right;margin-left:.75rem">
+        <div class="sr-amt" style="font-size:1rem">$${price.toFixed(2)}</div>
+        <button class="btn btn-danger btn-sm" style="margin-top:.35rem;font-size:.7rem;padding:.2rem .5rem" onclick="removeFromCart(${item.cart_item_id||item.id})">Remove</button>
+      </div>
+    </div>`;
+  }).join('');
+  const totalEl=document.getElementById('cartTotal');
+  if(totalEl)totalEl.textContent='$'+total.toFixed(2);
+  const chk=document.getElementById('chkBtn');
+  if(chk)chk.disabled=false;
+}
+async function removeFromCart(cid){
+  try{
+    await req('DELETE','/api/cart/'+cid);
+    await loadCart();
+    toast('Removed from cart','ok');
+  }catch(e){toast(e.message,'err');}
+}
+async function checkout(){
+  if(!me){openModal('signin');return;}
+  if(!cart||!cart.length){toast('Cart is empty','info');return;}
+  const ids=cart.map(i=>i.product_id||i.id).filter(Boolean);
+  if(!ids.length){toast('No valid items','err');return;}
+  ld('chkBtn',true,'Processing…');
+  try{
+    const d=await req('POST','/api/orders',{items:ids});
+    toast('Purchase complete — $'+d.total_paid,'ok');
+    cart=[];
+    renderCartUI();
+    const me2=await req('GET','/api/auth/me');
+    me=me2.user;
+    updateWallet(me.wallet_balance);
+    nav('view-library',null);
+  }catch(e){
+    if(e.message.includes('Insufficient'))toast('Insufficient balance','err');
+    else if(e.message.includes('already bought'))toast('You already own one of these','err');
+    else toast(e.message,'err');
+  }
+  ld('chkBtn',false,'Checkout');
+}
+async function toggleFav(pid){
+  if(!me){openModal('signin');return;}
+  try{
+    await req('POST','/api/favorites',{product_id:pid});
+    toast('Added to favorites','ok');
+  }catch(e){
+    try{
+      await req('DELETE','/api/favorites/'+pid);
+      toast('Removed from favorites','info');
+    }catch(e2){}
   }
 }
 
 /* ── LIBRARY ──────────────────────────────────────────────── */
 async function loadLibrary(){
-  if(!me){ document.getElementById('libGrid').innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🔒</span><span class="empty-title">Sign in to view Library</span><button class="btn btn-p btn-sm" onclick="openModal(\'signin\')" style="margin-top:.75rem">Sign In</button></div>'; return; }
+  if(!me){
+    document.getElementById('libGrid').innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🔒</span><span class="empty-title">Sign in to view Library</span><button class="btn btn-p btn-sm" onclick="openModal(\'signin\')" style="margin-top:.75rem">Sign In</button></div>';
+    return;
+  }
   document.getElementById('libGrid').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/orders/library');
     const el=document.getElementById('libGrid');
-    if(!d.library.length){el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📚</span><span class="empty-title">No purchases yet</span></div>';return;}
+    if(!d.library.length){
+      el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📚</span><span class="empty-title">No purchases yet</span></div>';
+      return;
+    }
     el.innerHTML=d.library.map(o=>`
       <div class="lcard">
         ${o.image_url?`<img class="lcard-img" src="${x(o.image_url)}" alt="">`:`<div class="lcard-img-ph">📦</div>`}
@@ -1279,24 +1413,24 @@ async function loadLibrary(){
           <a href="${x(o.file_url)}" target="_blank" class="btn btn-s btn-sm btn-w" style="margin-top:.5rem">⬇ Download</a>
         </div>
       </div>`).join('');
-  }catch(e){ document.getElementById('libGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>'; }
+  }catch(e){document.getElementById('libGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>';}
 }
 
 /* ── DASHBOARD ────────────────────────────────────────────── */
 async function loadDashboard(){
-  if(!me){ authWall('view-dashboard'); return; }
+  if(!me){authWall('view-dashboard');return;}
   try{
     const [s,sales,top]=await Promise.all([
       req('GET','/api/seller/stats'),
       req('GET','/api/seller/sales?limit=6'),
       req('GET','/api/seller/top-products'),
     ]);
-    document.getElementById('dRevVal').textContent ='$'+s.net_revenue.toFixed(2);
-    document.getElementById('dRevSub').textContent  ='5% fee on $'+s.gross_revenue.toFixed(2);
-    document.getElementById('dSaleVal').textContent =s.total_sales;
-    document.getElementById('dSaleSub').textContent ='total orders';
-    document.getElementById('dViewVal').textContent =s.views;
-    document.getElementById('dListVal').textContent =s.product_count;
+    document.getElementById('dRevVal').textContent='$'+s.net_revenue.toFixed(2);
+    document.getElementById('dRevSub').textContent='5% fee on $'+s.gross_revenue.toFixed(2);
+    document.getElementById('dSaleVal').textContent=s.total_sales;
+    document.getElementById('dSaleSub').textContent='total orders';
+    document.getElementById('dViewVal').textContent=s.views;
+    document.getElementById('dListVal').textContent=s.product_count;
     ['dRevBars','dSaleBars','dViewBars'].forEach(id=>microBars(id));
     const se=document.getElementById('dashSales');
     se.innerHTML=!sales.sales.length
@@ -1306,11 +1440,10 @@ async function loadDashboard(){
     te.innerHTML=!top.products.length
       ?'<div style="font-size:.8rem;color:var(--t3);padding:.25rem">No listings yet.</div>'
       :top.products.map((p,i)=>`<div class="sale-row"><span style="font-family:var(--mono);font-size:.79rem;color:var(--blue);width:20px;flex-shrink:0">#${i+1}</span><div style="flex:1;min-width:0"><div class="sr-title ellipsis">${x(p.title)}</div><div class="sr-buyer">${p.sales_count} sales</div></div><div class="sr-amt">$${(+(p.gross_revenue||0)).toFixed(0)}</div></div>`).join('');
-  }catch(e){ toast('Dashboard: '+e.message,'err'); }
+  }catch(e){toast('Dashboard: '+e.message,'err');}
 }
-
 function microBars(id){
-  const el=document.getElementById(id); if(!el) return;
+  const el=document.getElementById(id);if(!el)return;
   el.innerHTML=Array(10).fill(0).map(()=>`<div class="mb-bar" style="height:${10+Math.random()*90}%"></div>`).join('');
 }
 
@@ -1321,12 +1454,12 @@ function onFileDrop(e){
   uploadFile(e.dataTransfer.files[0]);
 }
 async function uploadFile(f){
-  if(!f) return;
-  if(!me){ openModal('signin'); return; }
+  if(!f)return;
+  if(!me){openModal('signin');return;}
   const prog=document.getElementById('fileProg'),fill=document.getElementById('fileProgFill');
-  prog.style.display='block'; fill.style.width='0%';
+  prog.style.display='block';fill.style.width='0%';
   document.getElementById('fileZoneText').textContent='Uploading…';
-  const fd=new FormData(); fd.append('file',f); fd.append('type','file');
+  const fd=new FormData();fd.append('file',f);fd.append('type','file');
   try{
     fill.style.width='40%';
     const d=await req('POST','/api/upload',fd,true);
@@ -1335,59 +1468,68 @@ async function uploadFile(f){
     document.getElementById('fPid').value=d.public_id;
     document.getElementById('fileZoneText').textContent='✓ '+f.name;
     toast('File uploaded','ok');
-  }catch(e){ toast('Upload failed: '+e.message,'err'); document.getElementById('fileZoneText').textContent='Tap to upload product files'; }
-  setTimeout(()=>{ prog.style.display='none'; fill.style.width='0%'; },900);
+  }catch(e){
+    toast('Upload failed: '+e.message,'err');
+    document.getElementById('fileZoneText').textContent='Tap to upload product files';
+  }
+  setTimeout(()=>{prog.style.display='none';fill.style.width='0%';},900);
 }
 async function uploadImg(f){
-  if(!f) return;
+  if(!f)return;
   document.getElementById('imgZoneText').textContent='Uploading…';
-  const fd=new FormData(); fd.append('file',f); fd.append('type','image');
+  const fd=new FormData();fd.append('file',f);fd.append('type','image');
   try{
     const d=await req('POST','/api/upload',fd,true);
     document.getElementById('iUrl').value=d.url;
     document.getElementById('iPid').value=d.public_id;
     document.getElementById('imgZoneText').textContent='✓ Cover image uploaded';
     toast('Image uploaded','ok');
-  }catch(e){ toast('Image upload failed: '+e.message,'err'); document.getElementById('imgZoneText').textContent='🖼️ Tap to upload cover image'; }
+  }catch(e){
+    toast('Image upload failed: '+e.message,'err');
+    document.getElementById('imgZoneText').textContent='🖼️ Tap to upload cover image';
+  }
 }
 async function publishProduct(){
-  if(!me){ openModal('signin'); return; }
+  if(!me){openModal('signin');return;}
   const title=document.getElementById('upTitle').value.trim();
-  const cat  =document.getElementById('upCat').value;
+  const cat=document.getElementById('upCat').value;
   const price=document.getElementById('upPrice').value;
-  const fUrl =document.getElementById('fUrl').value;
-  if(!title) return toast('Title required','err');
-  if(!cat)   return toast('Category required','err');
-  if(!price) return toast('Price required','err');
-  if(!fUrl)  return toast('Upload a product file first','err');
+  const fUrl=document.getElementById('fUrl').value;
+  if(!title)return toast('Title required','err');
+  if(!cat)return toast('Category required','err');
+  if(!price)return toast('Price required','err');
+  if(!fUrl)return toast('Upload product file first','err');
   const tags=document.getElementById('upTags').value.split(',').map(t=>t.trim()).filter(Boolean);
   ld('pubBtn',true,'Publishing…');
   try{
-    await req('POST','/api/products',{title,category:cat,price:+price,
-      description:document.getElementById('upDesc').value,tags,
-      file_url:fUrl,file_public_id:document.getElementById('fPid').value,
-      image_url:document.getElementById('iUrl').value,image_public_id:document.getElementById('iPid').value});
+    await req('POST','/api/products',{
+      title,category:cat,price:+price,
+      description:document.getElementById('upDesc').value,
+      tags,file_url:fUrl,file_public_id:document.getElementById('fPid').value,
+      image_url:document.getElementById('iUrl').value,image_public_id:document.getElementById('iPid').value
+    });
     toast('Product published!','ok');
     resetListForm();
     nav('view-listings',null);
-  }catch(e){ toast(e.message,'err'); }
+  }catch(e){toast(e.message,'err');}
   ld('pubBtn',false,'Publish');
 }
 function resetListForm(){
-  ['upTitle','upCat','upPrice','upTags','upDesc','fUrl','fPid','iUrl','iPid']
-    .forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  ['upTitle','upCat','upPrice','upTags','upDesc','fUrl','fPid','iUrl','iPid'].forEach(id=>{
+    const e=document.getElementById(id);if(e)e.value='';
+  });
   document.getElementById('fileZoneText').textContent='Tap to upload product files';
-  document.getElementById('imgZoneText').textContent ='🖼️ Tap to upload cover image';
+  document.getElementById('imgZoneText').textContent='🖼️ Tap to upload cover image';
 }
 
 /* ── MY LISTINGS ──────────────────────────────────────────── */
 async function loadMyListings(){
-  if(!me){ authWall('view-listings'); return; }
+  if(!me){authWall('view-listings');return;}
   document.getElementById('myGrid').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/products/mine');
     renderGrid('myGrid',d.products);
-  }catch(e){ document.getElementById('myGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>'; }
+  }catch(e){document.getElementById('myGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>';}
 }
 
 /* ── MESSAGES ─────────────────────────────────────────────── */
@@ -1400,7 +1542,7 @@ function setupDesktopMsgLayout(){
       wrap.classList.add('msg-split');
       wrap.appendChild(th);
     }
-  } else {
+  }else{
     if(wrap.classList.contains('msg-split')){
       wrap.classList.remove('msg-split');
       document.getElementById('view-messages').appendChild(th);
@@ -1408,7 +1550,7 @@ function setupDesktopMsgLayout(){
   }
 }
 async function loadConvs(){
-  if(!me){ authWall('view-messages'); return; }
+  if(!me){authWall('view-messages');return;}
   document.getElementById('convList').innerHTML='<div class="loading"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/messages');
@@ -1431,10 +1573,10 @@ async function loadConvs(){
       </div>`).join('');
     const total=d.conversations.reduce((s,c)=>s+(c.unread_count||0),0);
     setMsgBadge(total);
-  }catch(e){ document.getElementById('convList').innerHTML='<div class="loading">'+e.message+'</div>'; }
+  }catch(e){document.getElementById('convList').innerHTML='<div class="loading">'+e.message+'</div>';}
 }
-async function openConv(uid, uname, avatar, pid){
-  convId=uid; convPid=pid;
+async function openConv(uid,uname,avatar,pid){
+  convId=uid;convPid=pid;
   document.getElementById('thName').textContent=uname;
   document.getElementById('thProd').textContent=pid?'re: a product':'';
   const av=document.getElementById('thAv');
@@ -1446,46 +1588,49 @@ async function openConv(uid, uname, avatar, pid){
     const el=document.getElementById('bubbles');
     el.innerHTML=d.messages.map(m=>`<div class="bub ${m.sender_id===me?.id?'mine':'theirs'}">${x(m.content)}<div class="bub-time">${ago(m.created_at)}</div></div>`).join('');
     el.scrollTop=el.scrollHeight;
-    loadConvs(); // refresh unread counts
-  }catch(e){ toast(e.message,'err'); }
+    loadConvs();
+  }catch(e){toast(e.message,'err');}
 }
-function closeThread(){ document.getElementById('threadWrap').classList.remove('open'); }
+function closeThread(){
+  document.getElementById('threadWrap').classList.remove('open');
+  convId=null;
+}
 async function sendMsg(){
   const inp=document.getElementById('msgInp');
   const content=inp.value.trim();
-  if(!content||!convId) return;
+  if(!content||!convId)return;
   inp.value='';
   try{
     await req('POST','/api/messages',{receiver_id:convId,content,product_id:convPid});
     openConv(convId,document.getElementById('thName').textContent,'',convPid);
-  }catch(e){ toast(e.message,'err'); }
+  }catch(e){toast(e.message,'err');}
 }
-function openMsgSeller(sid, sname, pid){
+function openMsgSeller(sid,sname,pid){
   closeModal('product');
-  msSellerId=sid; msProdId=pid;
+  msSellerId=sid;msProdId=pid;
   document.getElementById('msgSellerSub').textContent='Message to '+sname;
   openModal('msgSeller');
 }
 async function doMsgSeller(){
-  if(!me){ openModal('signin'); return; }
+  if(!me){openModal('signin');return;}
   const content=document.getElementById('msgSellerTxt').value.trim();
-  if(!content) return toast('Message is empty','err');
+  if(!content)return toast('Message is empty','err');
   ld('msBtnSend',true,'Sending…');
   try{
     await req('POST','/api/messages',{receiver_id:msSellerId,content,product_id:msProdId});
     toast('Message sent!','ok');
     closeModal('msgSeller');
     document.getElementById('msgSellerTxt').value='';
-  }catch(e){ toast(e.message,'err'); }
+  }catch(e){toast(e.message,'err');}
   ld('msBtnSend',false,'Send Message');
 }
 function setMsgBadge(n){
-  const d1=document.getElementById('drMsgBdg'), d2=document.getElementById('tabDot'), d3=document.getElementById('topDot');
-  if(n>0){ d1.textContent=n; d1.classList.remove('hidden'); d2.classList.remove('hidden'); d3.classList.remove('hidden'); }
-  else { d1.classList.add('hidden'); d2.classList.add('hidden'); d3.classList.add('hidden'); }
+  const d1=document.getElementById('drMsgBdg'),d2=document.getElementById('tabDot'),d3=document.getElementById('topDot');
+  if(n>0){d1.textContent=n;d1.classList.remove('hidden');d2.classList.remove('hidden');d3.classList.remove('hidden');}
+  else{d1.classList.add('hidden');d2.classList.add('hidden');d3.classList.add('hidden');}
 }
 async function pollUnread(){
-  if(!token) return;
+  if(!token)return;
   try{
     const d=await req('GET','/api/messages');
     setMsgBadge((d.conversations||[]).reduce((s,c)=>s+(c.unread_count||0),0));
@@ -1494,7 +1639,7 @@ async function pollUnread(){
 
 /* ── WALLET ───────────────────────────────────────────────── */
 async function loadWallet(){
-  if(!me){ authWall('view-wallet'); return; }
+  if(!me){authWall('view-wallet');return;}
   document.getElementById('txnList').innerHTML='<div class="loading"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/wallet');
@@ -1515,7 +1660,7 @@ async function loadWallet(){
         <div class="txn-amt ${sign?'green':'red'}">${sign?'+':'-'}$${Math.abs(+t.net_amount).toFixed(2)}</div>
       </div>`;
     }).join('')}</div>`;
-  }catch(e){ toast('Wallet: '+e.message,'err'); }
+  }catch(e){toast('Wallet: '+e.message,'err');}
 }
 function previewNet(){
   const v=parseFloat(document.getElementById('wdAmt').value);
@@ -1523,38 +1668,38 @@ function previewNet(){
 }
 async function fundWallet(){
   const amount=parseFloat(document.getElementById('fndAmt').value);
-  if(isNaN(amount)||amount<=0) return toast('Enter a valid amount','err');
+  if(isNaN(amount)||amount<=0)return toast('Enter a valid amount','err');
   ld('fndBtn',true,'Processing…');
   try{
     await req('POST','/api/wallet/fund',{amount});
     toast('$'+amount.toFixed(2)+' added','ok');
     closeModal('fundWallet');
-    const d2=await req('GET','/api/auth/me'); me=d2.user; updateWallet(me.wallet_balance);
+    const d2=await req('GET','/api/auth/me');me=d2.user;updateWallet(me.wallet_balance);
     loadWallet();
-  }catch(e){ toast(e.message,'err'); }
+  }catch(e){toast(e.message,'err');}
   ld('fndBtn',false,'Continue');
 }
 async function doWithdraw(){
   const amount=parseFloat(document.getElementById('wdAmt').value);
-  const bank  =document.getElementById('wdBank').value.trim();
+  const bank=document.getElementById('wdBank').value.trim();
   const accNum=document.getElementById('wdAccNum').value.trim();
-  const accNm =document.getElementById('wdAccName').value.trim();
-  if(isNaN(amount)||amount<=0) return toast('Valid amount required','err');
-  if(!bank||!accNum||!accNm) return toast('All bank details required','err');
+  const accNm=document.getElementById('wdAccName').value.trim();
+  if(isNaN(amount)||amount<=0)return toast('Valid amount required','err');
+  if(!bank||!accNum||!accNm)return toast('All bank details required','err');
   ld('wdBtn',true,'Processing…');
   try{
     const d=await req('POST','/api/wallet/withdraw',{amount,bank_name:bank,account_number:accNum,account_name:accNm});
     toast('Withdrawal initiated — Net: $'+d.net,'ok');
     closeModal('withdraw');
     loadWallet();
-  }catch(e){ toast(e.message,'err'); }
+  }catch(e){toast(e.message,'err');}
   ld('wdBtn',false,'Withdraw');
 }
 
 /* ── PROFILE ──────────────────────────────────────────────── */
 async function loadProfile(){
-  if(!me){ authWall('view-profile'); return; }
-  try{ const d=await req('GET','/api/auth/me'); me=d.user; applyMe(); }catch(e){}
+  if(!me){authWall('view-profile');return;}
+  try{const d=await req('GET','/api/auth/me');me=d.user;applyMe();}catch(e){}
 }
 async function saveProfile(){
   try{
@@ -1563,17 +1708,17 @@ async function saveProfile(){
       bio:document.getElementById('profBio').value.trim()
     });
     toast('Profile saved','ok');
-    const d=await req('GET','/api/auth/me'); me=d.user; applyMe();
-  }catch(e){ toast(e.message,'err'); }
+    const d=await req('GET','/api/auth/me');me=d.user;applyMe();
+  }catch(e){toast(e.message,'err');}
 }
 async function uploadAvatar(f){
-  if(!f) return;
-  const fd=new FormData(); fd.append('file',f); fd.append('type','avatar');
+  if(!f)return;
+  const fd=new FormData();fd.append('file',f);fd.append('type','avatar');
   try{
     await req('POST','/api/upload',fd,true);
-    const d=await req('GET','/api/auth/me'); me=d.user; applyMe();
+    const d=await req('GET','/api/auth/me');me=d.user;applyMe();
     toast('Avatar updated','ok');
-  }catch(e){ toast('Avatar upload failed: '+e.message,'err'); }
+  }catch(e){toast('Avatar upload failed: '+e.message,'err');}
 }
 
 /* ── AUTH WALL ────────────────────────────────────────────── */
@@ -1585,21 +1730,23 @@ function authWall(viewId){
 /* ── MODAL ────────────────────────────────────────────────── */
 function openModal(id){
   const el=document.getElementById('modal-'+id);
-  if(!el) return;
+  if(!el)return;
   el.classList.remove('hidden');
   document.body.style.overflow='hidden';
 }
 function closeModal(id){
   const el=document.getElementById('modal-'+id);
-  if(!el) return;
+  if(!el)return;
   el.classList.add('hidden');
   document.body.style.overflow='';
 }
-function switchModal(a,b){ closeModal(a); setTimeout(()=>openModal(b),200); }
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){
-  ['signin','register','product','fundWallet','withdraw','msgSeller'].forEach(closeModal);
-  closeThread();
-}});
+function switchModal(a,b){closeModal(a);setTimeout(()=>openModal(b),200);}
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){
+    ['signin','register','product','fundWallet','withdraw','msgSeller'].forEach(closeModal);
+    closeThread();
+  }
+});
 
 /* ── TOAST ────────────────────────────────────────────────── */
 function toast(msg,type='info'){
@@ -1611,14 +1758,14 @@ function toast(msg,type='info'){
 }
 
 /* ── UTILS ────────────────────────────────────────────────── */
-function x(s){ return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
-function ld(id,on,lbl){ const e=document.getElementById(id); if(!e) return; e.disabled=on; if(lbl) e.textContent=lbl; }
-function initials(s){ return String(s||'?')[0].toUpperCase(); }
+function x(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function ld(id,on,lbl){const e=document.getElementById(id);if(!e)return;e.disabled=on;if(lbl)e.textContent=lbl;}
+function initials(s){return String(s||'?')[0].toUpperCase();}
 function ago(d){
-  if(!d) return '';
+  if(!d)return '';
   const m=Math.floor((Date.now()-new Date(d).getTime())/60000);
-  if(m<1) return 'now'; if(m<60) return m+'m'; const h=Math.floor(m/60);
-  if(h<24) return h+'h'; return Math.floor(h/24)+'d';
+  if(m<1)return 'now';if(m<60)return m+'m';const h=Math.floor(m/60);
+  if(h<24)return h+'h';return Math.floor(h/24)+'d';
 }
 </script>
 </body>
