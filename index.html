@@ -964,6 +964,17 @@ img{display:block;max-width:100%}
     <button class="btn btn-p btn-w" id="msBtnSend" onclick="doMsgSeller()">Send Message</button>
   </div>
 </div>
+<!-- Reply to Review -->
+<div class="overlay center hidden" id="modal-replyReview" onclick="if(event.target===this)closeModal('replyReview')">
+  <div class="mbox" style="position:relative">
+    <button class="m-close" onclick="closeModal('replyReview')">&times;</button>
+    <div class="mbox-title">Reply to Review</div>
+    <div class="mbox-sub" id="replyReviewSub">Respond to buyer feedback</div>
+    <div class="fld"><label>Your Response</label><textarea class="ta" id="replyReviewTxt" placeholder="Thank you for your feedback..." maxlength="1000"></textarea><div style="font-size:.7rem;color:var(--t3);text-align:right;margin-top:.2rem"><span id="replyCharCount">0</span>/1000</div></div>
+    <button class="btn btn-p btn-w" id="replyBtn" onclick="doReplyReview()">Post Reply</button>
+  </div>
+</div>
+
 
 <script>
 'use strict';
@@ -1230,11 +1241,22 @@ async function openProd(id){
       :`<div class="prod-sheet-ph">📦</div>`;
     const tags=(p.tags||[]).map(t=>`<span class="pc-tag">${x(t)}</span>`).join('');
     const revs=(p.reviews||[]).length
-      ?(p.reviews.map(r=>`<div class="rev-item">
-          <div class="rev-head"><span class="rev-name">${x(r.reviewer_name)}</span><span class="rev-stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span></div>
-          <div class="rev-text">${x(r.comment||'')}</div>
-        </div>`).join(''))
-      :`<div style="font-size:.8rem;color:var(--t3)">No reviews yet.</div>`;
+  ?(p.reviews.map(r=>{
+      const sellerReply = r.seller_reply ? `
+        <div style="margin-top:.6rem;padding:.6rem .75rem;background:var(--green-dim);border-left:3px solid var(--green);border-radius:0 var(--r-sm) var(--r-sm) 0;">
+          <div style="font-size:.7rem;color:var(--green);font-weight:600;margin-bottom:.2rem">Seller Response</div>
+          <div style="font-size:.78rem;color:var(--t2);line-height:1.6">${x(r.seller_reply)}</div>
+        </div>
+      ` : '';
+      return `<div class="rev-item">
+        <div class="rev-head"><span class="rev-name">${x(r.reviewer_name)}</span><span class="rev-stars">${'★'.repeat(r.rating)}${'☆'.repeat(5-r.rating)}</span></div>
+        <div class="rev-text">${x(r.comment||'')}</div>
+        ${sellerReply}
+        ${(isMine && !r.seller_reply) ? `<button class="btn btn-s btn-sm" style="margin-top:.5rem;font-size:.7rem" onclick="openReplyForm(${p.id},${r.id},'${x(r.reviewer_name)}')">Reply to Review</button>` : ''}
+      </div>`;
+    }).join(''))
+  :`<div style="font-size:.8rem;color:var(--t3)">No reviews yet.</div>`;
+
     
     const userReviewed = me&&p.reviews&&p.reviews.find(r=>r.reviewer_id===me.id);
     const canReview = me&&!isMine&&!userReviewed;
@@ -1279,19 +1301,44 @@ function setRating(n){
     btn.style.color=idx<n?'var(--amber)':'var(--t3)';
   });
 }
-async function submitReview(pid){
-  if(!currentRating)return toast('Select a star rating','err');
-  const comment=document.getElementById('revText').value.trim();
-  try{
-    await req('POST','/api/products/'+pid+'/reviews',{rating:currentRating,comment});
-    toast('Review submitted','ok');
-    currentRating=0;
-    openProd(pid);
-  }catch(e){
-    if(e.message.includes('Purchase required'))toast('Purchase required to review','err');
-    else if(e.message.includes('Already reviewed'))toast('You already reviewed this','err');
-    else toast(e.message,'err');
+let replyPid = null;
+let replyRid = null;
+
+function openReplyForm(pid, rid, reviewerName){
+  if(!me){openModal('signin');return;}
+  replyPid = pid;
+  replyRid = rid;
+  document.getElementById('replyReviewSub').textContent = 'Replying to ' + reviewerName;
+  document.getElementById('replyReviewTxt').value = '';
+  document.getElementById('replyCharCount').textContent = '0';
+  openModal('replyReview');
+}
+
+// Character counter
+document.addEventListener('DOMContentLoaded', () => {
+  const ta = document.getElementById('replyReviewTxt');
+  if(ta){
+    ta.addEventListener('input', () => {
+      document.getElementById('replyCharCount').textContent = ta.value.length;
+    });
   }
+});
+
+async function doReplyReview(){
+  const reply = document.getElementById('replyReviewTxt').value.trim();
+  if(!reply) return toast('Reply cannot be empty', 'err');
+  if(reply.length > 1000) return toast('Reply too long (max 1000 chars)', 'err');
+  
+  ld('replyBtn', true, 'Posting...');
+  try{
+    await req('PUT', '/api/products/' + replyPid + '/reviews/' + replyRid + '/reply', {reply: reply});
+    toast('Reply posted', 'ok');
+    closeModal('replyReview');
+    openProd(replyPid); // Refresh product view
+  }catch(e){
+    toast(e.message, 'err');
+  }
+  ld('replyBtn', false, 'Post Reply');
 }
 
 /* ── CART ──────────────────────────────────────────────────── */
