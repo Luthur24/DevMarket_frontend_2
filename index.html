@@ -631,7 +631,10 @@ img{display:block;max-width:100%}
 
   <!-- LIBRARY -->
   <section id="view-library" class="view">
-    <div class="view-header"><div class="vh-title">Library</div><div class="vh-sub">Your purchased products</div></div>
+    <div class="view-header"><div class="vh-title">Library</div><div class="vh-sub">Your purchased products</div><div class="search-box" style="margin-top:.75rem">
+  <input type="search" id="libSearch" placeholder="Search your purchases…" oninput="filterLibrary()">
+</div>
+</div>
     <div class="lib-grid" id="libGrid"><div class="loading" style="grid-column:1/-1"><div class="spin"></div></div></div>
   </section>
 
@@ -1316,7 +1319,7 @@ function renderCartUI(){
   const dot=document.getElementById('cartDot');
   if(!el)return;
   if(!cart||!cart.length){
-    el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🛒</span><span class="empty-title">Cart is empty</span></div>';
+    el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🛒</span><span class="empty-title">Cart is empty</span><button class="btn btn-p btn-sm" onclick="nav(\'view-browse\',null)" style="margin-top:.75rem">Browse Products</button></div>';
     dot?.classList.add('hidden');
     const totalEl=document.getElementById('cartTotal');
     if(totalEl)totalEl.textContent='$0.00';
@@ -1528,8 +1531,55 @@ async function loadMyListings(){
   document.getElementById('myGrid').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/products/mine');
-    renderGrid('myGrid',d.products);
+    const el=document.getElementById('myGrid');
+    if(!d.products.length){
+      el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📦</span><span class="empty-title">No listings yet</span></div>';
+      return;
+    }
+    el.innerHTML=d.products.map(p=>{
+      const img=p.image_url?`<img class="pc-img" src="${x(p.image_url)}" alt="">`:`<div class="pc-img-ph">📦</div>`;
+      return`<div class="pcard">
+        ${img}
+        <div class="pc-body">
+          <div class="pc-title ellipsis">${x(p.title)}</div>
+          <div class="pc-seller">$${(+p.price).toFixed(2)} · ${p.sales_count||0} sales</div>
+          <div class="pc-tags">${(p.tags||[]).slice(0,3).map(t=>`<span class="pc-tag">${x(t)}</span>`).join('')}</div>
+          <div class="pc-foot" style="margin-top:.5rem">
+            <button class="btn btn-s btn-sm" onclick="editProduct(${p.id})">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteProduct(${p.id})">Delete</button>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
   }catch(e){document.getElementById('myGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>';}
+}
+
+/* ── EDIT/DELETE PRODUCT ─────────────────────────────────── */
+async function editProduct(pid){
+  try{
+    const d=await req('GET','/api/products/'+pid);
+    const p=d.product;
+    const newTitle=prompt('Title:',p.title);
+    if(!newTitle||newTitle===p.title)return;
+    const newPrice=prompt('Price:',p.price);
+    if(!newPrice)return;
+    const newDesc=prompt('Description:',p.description||'');
+    await req('PUT','/api/products/'+pid,{
+      title:newTitle,
+      price:parseFloat(newPrice),
+      description:newDesc
+    });
+    toast('Product updated','ok');
+    loadMyListings();
+  }catch(e){toast(e.message,'err');}
+}
+async function deleteProduct(pid){
+  if(!confirm('Delete this product?'))return;
+  try{
+    await req('DELETE','/api/products/'+pid);
+    toast('Product deleted','ok');
+    loadMyListings();
+  }catch(e){toast(e.message,'err');}
 }
 
 /* ── MESSAGES ─────────────────────────────────────────────── */
