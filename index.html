@@ -984,6 +984,7 @@ let convPid = null;
 let msSellerId = null;
 let msProdId   = null;
 let currentRating = 0;
+let myLibraryCache = []; // FIX: Added for library search
 
 /* ── HTTP ─────────────────────────────────────────────────── */
 async function req(method, path, body, fd){
@@ -1394,6 +1395,7 @@ async function toggleFav(pid){
 }
 
 /* ── LIBRARY ──────────────────────────────────────────────── */
+// FIX: Updated loadLibrary to use cache and separate render function
 async function loadLibrary(){
   if(!me){
     document.getElementById('libGrid').innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">🔒</span><span class="empty-title">Sign in to view Library</span><button class="btn btn-p btn-sm" onclick="openModal(\'signin\')" style="margin-top:.75rem">Sign In</button></div>';
@@ -1402,21 +1404,40 @@ async function loadLibrary(){
   document.getElementById('libGrid').innerHTML='<div class="loading" style="grid-column:1/-1"><div class="spin"></div></div>';
   try{
     const d=await req('GET','/api/orders/library');
-    const el=document.getElementById('libGrid');
-    if(!d.library.length){
-      el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📚</span><span class="empty-title">No purchases yet</span></div>';
-      return;
-    }
-    el.innerHTML=d.library.map(o=>`
-      <div class="lcard">
-        ${o.image_url?`<img class="lcard-img" src="${x(o.image_url)}" alt="">`:`<div class="lcard-img-ph">📦</div>`}
-        <div class="lcard-body">
-          <div class="lcard-title ellipsis">${x(o.title)}</div>
-          <div class="lcard-seller">by ${x(o.seller_name)}</div>
-          <a href="${x(o.file_url)}" target="_blank" class="btn btn-s btn-sm btn-w" style="margin-top:.5rem">⬇ Download</a>
-        </div>
-      </div>`).join('');
+    myLibraryCache = d.library || []; // Cache for search
+    renderLibrary(myLibraryCache);
   }catch(e){document.getElementById('libGrid').innerHTML='<div class="loading" style="grid-column:1/-1">'+e.message+'</div>';}
+}
+
+// FIX: Added separate render function for library
+function renderLibrary(items){
+  const el=document.getElementById('libGrid');
+  if(!items.length){
+    el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📚</span><span class="empty-title">No purchases found</span></div>';
+    return;
+  }
+  el.innerHTML=items.map(o=>`
+    <div class="lcard">
+      ${o.image_url?`<img class="lcard-img" src="${x(o.image_url)}" alt="">`:`<div class="lcard-img-ph">📦</div>`}
+      <div class="lcard-body">
+        <div class="lcard-title ellipsis">${x(o.title)}</div>
+        <div class="lcard-seller">by ${x(o.seller_name)}</div>
+        <a href="${x(o.file_url)}" target="_blank" class="btn btn-s btn-sm btn-w" style="margin-top:.5rem">⬇ Download</a>
+      </div>
+    </div>`).join('');
+}
+
+// FIX: Added missing search function
+function filterLibrary(){
+  const q=document.getElementById('libSearch').value.trim().toLowerCase();
+  if(!q){
+    renderLibrary(myLibraryCache);
+    return;
+  }
+  const filtered=myLibraryCache.filter(o=>(
+    (o.title||'').toLowerCase().includes(q)||(o.seller_name||'').toLowerCase().includes(q)
+  ));
+  renderLibrary(filtered);
 }
 
 /* ── DASHBOARD ────────────────────────────────────────────── */
@@ -1532,11 +1553,15 @@ async function loadMyListings(){
   try{
     const d=await req('GET','/api/products/mine');
     const el=document.getElementById('myGrid');
-    if(!d.products.length){
+    
+    // FIX: Filter out deleted/removed products
+    const activeProducts = d.products.filter(p => p.status !== 'removed');
+    
+    if(!activeProducts.length){
       el.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="empty-icon">📦</span><span class="empty-title">No listings yet</span></div>';
       return;
     }
-    el.innerHTML=d.products.map(p=>{
+    el.innerHTML=activeProducts.map(p=>{
       const img=p.image_url?`<img class="pc-img" src="${x(p.image_url)}" alt="">`:`<div class="pc-img-ph">📦</div>`;
       return`<div class="pcard">
         ${img}
