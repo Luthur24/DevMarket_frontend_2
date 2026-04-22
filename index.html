@@ -1091,8 +1091,9 @@
      SCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-const BACKEND = "https://devmarket-backend-1.onrender.com";
+const BACKEND    = "https://devmarket-backend-1.onrender.com";
 const MAX_RECENT = 8;
+let   _pollTimer = null;   // holds the active polling interval
 
 // ─── init ─────────────────────────────────────────────────────────
 (async () => {
@@ -1106,9 +1107,9 @@ const MAX_RECENT = 8;
 async function fetchStats() {
   try {
     const res = await fetch(`${BACKEND}/rivalscan/stats`);
-    const d = await res.json();
-    const s = d.searches || 0;
-    const v = d.visits   || 0;
+    const d   = await res.json();
+    const s   = d.searches || 0;
+    const v   = d.visits   || 0;
     countUp("statSearches", s);
     countUp("statVisits",   v);
     document.getElementById("navSearches").textContent = fmt(s);
@@ -1146,42 +1147,92 @@ document.getElementById("searchInput").addEventListener("keydown", e => {
   if (e.key === "Enter") doSearch();
 });
 
+// ── step 1: kick off job, get job_id immediately ──────────────────
 async function doSearch() {
   const query = document.getElementById("searchInput").value.trim();
   if (!query) return;
+
+  // cancel any running poll
+  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
 
   const btn = document.getElementById("searchBtn");
   btn.disabled = true;
   btn.textContent = "SCANNING…";
 
-  setStatus("loading", `Scanning rivals for "${query}"…`);
+  setStatus("loading", `Starting scan for "${query}"…`);
   showSkeletons();
 
+  let jobId;
   try {
-    const res = await fetch(`${BACKEND}/rivalscan/search`, {
-      method: "POST",
+    const res  = await fetch(`${BACKEND}/rivalscan/start`, {
+      method:  "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
+      body:    JSON.stringify({ query }),
     });
     const data = await res.json();
 
     if (!res.ok) {
-      setStatus("error", data.error || "Something went wrong.");
-      showErr(data.error || "Request failed. Try again.");
+      setStatus("error", data.error || "Failed to start scan.");
+      showErr(data.error || "Failed to start scan.");
+      btn.disabled = false; btn.textContent = "SCAN →";
       return;
     }
 
-    setStatus("done", `${data.total} rivals found for "${data.query}" · ${new Date(data.timestamp).toLocaleTimeString()}`);
-    saveRecentSearch(query);
-    renderResults(data);
-    fetchStats();
+    jobId = data.job_id;
   } catch (err) {
-    setStatus("error", "Could not reach the server.");
-    showErr("Network error — the server may be waking up. Try again in a moment.");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "SCAN →";
+    setStatus("error", "Could not reach the server. Make sure the backend is running.");
+    showErr("Could not reach the server. The backend may be waking up — try again in 30 seconds.");
+    btn.disabled = false; btn.textContent = "SCAN →";
+    return;
   }
+
+  // ── step 2: poll every 3s until done or error ─────────────────
+  let elapsed   = 0;
+  const MAX_WAIT = 180000; // 3 minutes
+  const INTERVAL = 3000;
+
+  const dots = ["", ".", "..", "..."];
+  let   di   = 0;
+
+  _pollTimer = setInterval(async () => {
+    elapsed += INTERVAL;
+    di = (di + 1) % dots.length;
+    setStatus("loading", `Scanning rivals for "${query}"${dots[di]} (${Math.round(elapsed/1000)}s)`);
+
+    if (elapsed >= MAX_WAIT) {
+      clearInterval(_pollTimer); _pollTimer = null;
+      setStatus("error", "Scan timed out after 3 minutes. Try again.");
+      showErr("Scan timed out. Please try again.");
+      btn.disabled = false; btn.textContent = "SCAN →";
+      return;
+    }
+
+    try {
+      const res  = await fetch(`${BACKEND}/rivalscan/result/${jobId}`);
+      const data = await res.json();
+
+      if (data.status === "pending") return; // still working, keep polling
+
+      clearInterval(_pollTimer); _pollTimer = null;
+
+      if (data.status === "error") {
+        setStatus("error", data.error || "AI error occurred.");
+        showErr(data.error || "Something went wrong. Try again.");
+        btn.disabled = false; btn.textContent = "SCAN →";
+        return;
+      }
+
+      // status === "done"
+      setStatus("done", `${data.total} rivals found for "${data.query}" · ${new Date(data.timestamp).toLocaleTimeString()}`);
+      saveRecentSearch(query);
+      renderResults(data);
+      fetchStats();
+      btn.disabled = false; btn.textContent = "SCAN →";
+
+    } catch (_) {
+      // network blip during poll — just keep trying, don't abort
+    }
+  }, INTERVAL);
 }
 
 // ─── status ───────────────────────────────────────────────────────
