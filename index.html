@@ -887,11 +887,12 @@
 
     <div class="search-hints">
       <span class="hint-label">Try:</span>
-      <span class="hint-tag" onclick="fillSearch('Spotify')">Spotify</span>
+      <span class="hint-tag" onclick="fillSearch('Ai platform specializing in coding.')">Ai platforms specialized in advanced coding.</span>
       <span class="hint-tag" onclick="fillSearch('Shopify')">Shopify</span>
-      <span class="hint-tag" onclick="fillSearch('Flutterwave')">Flutterwave</span>
-      <span class="hint-tag" onclick="fillSearch('student social platform')">Student platform</span>
-      <span class="hint-tag" onclick="fillSearch('food delivery app')">Food delivery</span>
+      <span class="hint-tag" onclick="fillSearch('List all asset management firm targeting low risk users')">List all asset management firm targeting low risk users</span>
+      <span class="hint-tag" onclick="fillSearch('I built a global research platform do you mind tellling me if something like this has been built.')">I built a global research platform do you mind tellling me if something like this has been built.</span>
+      <span class="hint-tag" onclick="fillSearch('food delivery app')">Food delivery app</span>
+      <span class="hint-tag" onclick="fillSearch('Google')">Google</span>
     </div>
 
     <div class="recent-wrap" id="recentWrap">
@@ -1000,7 +1001,7 @@
       </p>
       <p class="about-p">
         <strong>2. Scan</strong> — Our AI analyzes the competitive landscape instantly,
-        surfacing the top 5 rivals with threat ratings, activity levels, trends, funding data, and more.
+        surfacing the top 20 rivals with threat ratings, activity levels, trends, funding data, and more.
       </p>
       <p class="about-p">
         <strong>3. Act</strong> — Use the intelligence to sharpen your positioning,
@@ -1091,29 +1092,42 @@
      SCRIPT
 ════════════════════════════════════════════════════════════════════ -->
 <script>
-const BACKEND    = "https://devmarket-backend-1.onrender.com";
-const MAX_RECENT = 8;
-let   _pollTimer = null;   // holds the active polling interval
+// ─── config ───────────────────────────────────────────────────────
+const MISTRAL_KEY = "yjvknUyDmAP6SKLQAUtqM5FH65cP69Id";
+const MISTRAL_URL = "https://api.mistral.ai/v1/chat/completions";
+const MAX_RECENT  = 8;
 
 // ─── init ─────────────────────────────────────────────────────────
-(async () => {
+(() => {
   renderRecentSearches();
-  try {
-    await fetch(`${BACKEND}/rivalscan/track-visit`, { method: "POST" });
-  } catch (_) {}
-  fetchStats();
+  trackVisit();
+  loadStats();
 })();
 
-async function fetchStats() {
+function trackVisit() {
   try {
-    const res = await fetch(`${BACKEND}/rivalscan/stats`);
-    const d   = await res.json();
-    const s   = d.searches || 0;
-    const v   = d.visits   || 0;
+    const v = parseInt(localStorage.getItem("rs_visits") || "0") + 1;
+    localStorage.setItem("rs_visits", v);
+  } catch (_) {}
+}
+
+function loadStats() {
+  try {
+    const s = parseInt(localStorage.getItem("rs_searches") || "0");
+    const v = parseInt(localStorage.getItem("rs_visits")   || "0");
     countUp("statSearches", s);
     countUp("statVisits",   v);
     document.getElementById("navSearches").textContent = fmt(s);
     document.getElementById("navVisits").textContent   = fmt(v);
+  } catch (_) {}
+}
+
+function bumpSearchCount() {
+  try {
+    const s = parseInt(localStorage.getItem("rs_searches") || "0") + 1;
+    localStorage.setItem("rs_searches", s);
+    document.getElementById("navSearches").textContent = fmt(s);
+    document.getElementById("statSearches").textContent = s.toLocaleString();
   } catch (_) {}
 }
 
@@ -1136,6 +1150,55 @@ function countUp(id, target) {
 }
 const easeOut = t => 1 - Math.pow(1 - t, 3);
 
+// ─── prompt builder ───────────────────────────────────────────────
+function buildPrompt(query) {
+  return `You are a world-class competitive intelligence engine. The user has searched for: "${query}"
+
+Identify the top  real-world competitors or closely related companies/products to "${query}".
+Return ONLY a raw JSON array, no markdown, no backticks, no explanation, nothing else.
+
+Each item must follow this exact structure:
+[
+  {
+    "name": "Competitor Name",
+    "tagline": "One sharp sentence describing what they do",
+    "website": "https://example.com",
+    "category": "e.g. SaaS / Fintech / Social Media / EdTech",
+    "founded": "Year or Unknown",
+    "hq": "City, Country or Unknown",
+    "sources": ["Crunchbase", "TechCrunch", "Wikipedia"],
+    "activity_level": "High",
+    "threat_rating": 8,
+    "threat_reason": "One sentence explaining why they are a threat",
+    "similarity_score": 7,
+    "similarity_reason": "One sentence on how they overlap with the search",
+    "new_trends": ["Recent product launch or move", "Another recent development"],
+    "strengths": ["Key strength 1", "Key strength 2", "Key strength 3"],
+    "weaknesses": ["Weakness 1", "Weakness 2"],
+    "market_share": "~12% or Unlisted or Unknown",
+    "funding": "Series B - $40M or Bootstrapped or Unknown",
+    "employee_count": "200-500 or Unknown",
+    "image_query": "3-word visual search phrase for this company logo or brand"
+  }
+]
+
+Rules:
+- activity_level must be exactly one of: High, Medium, Low
+- threat_rating and similarity_score must be integers between 1 and 10
+- Return exactly any number of competitors between 3 and 20
+- Raw JSON array only. Absolutely no other text.`;
+}
+
+function stripFences(raw) {
+  let clean = raw.trim();
+  if (clean.startsWith("```")) {
+    const parts = clean.split("```");
+    clean = parts[1] || clean;
+    if (clean.toLowerCase().startsWith("json")) clean = clean.slice(4);
+  }
+  return clean.trim();
+}
+
 // ─── search ───────────────────────────────────────────────────────
 function fillSearch(val) {
   document.getElementById("searchInput").value = val;
@@ -1147,92 +1210,67 @@ document.getElementById("searchInput").addEventListener("keydown", e => {
   if (e.key === "Enter") doSearch();
 });
 
-// ── step 1: kick off job, get job_id immediately ──────────────────
 async function doSearch() {
   const query = document.getElementById("searchInput").value.trim();
   if (!query) return;
-
-  // cancel any running poll
-  if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
 
   const btn = document.getElementById("searchBtn");
   btn.disabled = true;
   btn.textContent = "SCANNING…";
 
-  setStatus("loading", `Starting scan for "${query}"…`);
+  setStatus("loading", `Scanning rivals for "${query}"…`);
   showSkeletons();
+  bumpSearchCount();
 
-  let jobId;
   try {
-    const res  = await fetch(`${BACKEND}/rivalscan/start`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({ query }),
+    const res = await fetch(MISTRAL_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${MISTRAL_KEY}`,
+        "Content-Type":  "application/json",
+      },
+      body: JSON.stringify({
+        model:       "mistral-large-latest",
+        messages:    [{ role: "user", content: buildPrompt(query) }],
+        temperature: 0.35,
+        max_tokens:  20000,
+      }),
     });
-    const data = await res.json();
 
     if (!res.ok) {
-      setStatus("error", data.error || "Failed to start scan.");
-      showErr(data.error || "Failed to start scan.");
-      btn.disabled = false; btn.textContent = "SCAN →";
-      return;
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || `Mistral error ${res.status}`);
     }
 
-    jobId = data.job_id;
+    const data       = await res.json();
+    const raw        = data.choices[0].message.content;
+    const competitors = JSON.parse(stripFences(raw));
+
+    if (!Array.isArray(competitors)) throw new Error("Unexpected AI response format");
+
+    const result = {
+      query,
+      competitors,
+      total:     competitors.length,
+      timestamp: new Date().toISOString(),
+    };
+
+    setStatus("done", `${result.total} rivals found for "${query}" · ${new Date().toLocaleTimeString()}`);
+    saveRecentSearch(query);
+    renderResults(result);
+
   } catch (err) {
-    setStatus("error", "Could not reach the server. Make sure the backend is running.");
-    showErr("Could not reach the server. The backend may be waking up — try again in 30 seconds.");
-    btn.disabled = false; btn.textContent = "SCAN →";
-    return;
+    const msg = err.message?.includes("401")
+      ? "Invalid API key."
+      : err.message?.includes("429")
+      ? "Rate limit hit — wait a moment and try again."
+      : "Scan failed: " + (err.message || "Unknown error");
+    setStatus("error", msg);
+    showErr(msg);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "SCAN →";
   }
-
-  // ── step 2: poll every 3s until done or error ─────────────────
-  let elapsed   = 0;
-  const MAX_WAIT = 180000; // 3 minutes
-  const INTERVAL = 3000;
-
-  const dots = ["", ".", "..", "..."];
-  let   di   = 0;
-
-  _pollTimer = setInterval(async () => {
-    elapsed += INTERVAL;
-    di = (di + 1) % dots.length;
-    setStatus("loading", `Scanning rivals for "${query}"${dots[di]} (${Math.round(elapsed/1000)}s)`);
-
-    if (elapsed >= MAX_WAIT) {
-      clearInterval(_pollTimer); _pollTimer = null;
-      setStatus("error", "Scan timed out after 3 minutes. Try again.");
-      showErr("Scan timed out. Please try again.");
-      btn.disabled = false; btn.textContent = "SCAN →";
-      return;
-    }
-
-    try {
-      const res  = await fetch(`${BACKEND}/rivalscan/result/${jobId}`);
-      const data = await res.json();
-
-      if (data.status === "pending") return; // still working, keep polling
-
-      clearInterval(_pollTimer); _pollTimer = null;
-
-      if (data.status === "error") {
-        setStatus("error", data.error || "AI error occurred.");
-        showErr(data.error || "Something went wrong. Try again.");
-        btn.disabled = false; btn.textContent = "SCAN →";
-        return;
-      }
-
-      // status === "done"
-      setStatus("done", `${data.total} rivals found for "${data.query}" · ${new Date(data.timestamp).toLocaleTimeString()}`);
-      saveRecentSearch(query);
-      renderResults(data);
-      fetchStats();
-      btn.disabled = false; btn.textContent = "SCAN →";
-
-    } catch (_) {
-      // network blip during poll — just keep trying, don't abort
-    }
-  }, INTERVAL);
 }
 
 // ─── status ───────────────────────────────────────────────────────
